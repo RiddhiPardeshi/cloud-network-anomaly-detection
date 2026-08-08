@@ -7,7 +7,6 @@ from datetime import datetime
 import json
 import logging
 from flask_sqlalchemy import SQLAlchemy
-import pymysql
 
 # Initialize SQLAlchemy instance
 db = SQLAlchemy()
@@ -15,80 +14,10 @@ db = SQLAlchemy()
 logger = logging.getLogger(__name__)
 
 
-def ensure_mysql_database_exists(config):
-    """
-    Connect to MySQL server using raw PyMySQL and create the target database if it does not exist.
-    Handles configured passwords and auto-tries common local dev passwords if default fails.
-    Returns the working password string.
-    """
-    passwords_to_try = [
-        config.DB_PASSWORD,
-        '',
-        'root',
-        'password',
-        '123456',
-        'admin',
-        'mysql',
-        'root123',
-        '1234',
-        'Password@123'
-    ]
-
-    connection = None
-    last_err = None
-    working_pwd = None
-    tried_set = set()
-
-    for pwd in passwords_to_try:
-        if pwd in tried_set:
-            continue
-        tried_set.add(pwd)
-
-        try:
-            connect_kwargs = {
-                'host': config.DB_HOST,
-                'port': config.DB_PORT,
-                'user': config.DB_USER,
-                'autocommit': True
-            }
-            if pwd != "":
-                connect_kwargs['password'] = pwd
-
-            connection = pymysql.connect(**connect_kwargs)
-            working_pwd = pwd
-            logger.info(f"Connected to MySQL server successfully (user='{config.DB_USER}').")
-            break
-        except pymysql.err.OperationalError as op_err:
-            last_err = op_err
-            continue
-
-    if connection is None:
-        logger.error(
-            f"MySQL Authentication Failed (Code 1045). Please set DB_PASSWORD in your .env file "
-            f"to match your local MySQL root password."
-        )
-        raise last_err
-
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"CREATE DATABASE IF NOT EXISTS `{config.DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-            )
-        connection.close()
-        logger.info(f"Database '{config.DB_NAME}' verified/created successfully.")
-    except Exception as e:
-        logger.warning(f"Could not auto-create MySQL database (may already exist): {e}")
-
-    return working_pwd
-
-
 def init_db(app):
-    """Initialize database connection and create all registered tables."""
+    """Initialize database connection and create all registered tables safely for production."""
     from config import Config
-    working_pwd = ensure_mysql_database_exists(Config)
-
-    # Sync app SQLALCHEMY_DATABASE_URI with verified working password
-    app.config['SQLALCHEMY_DATABASE_URI'] = Config.get_sqlalchemy_uri(working_pwd)
+    app.config['SQLALCHEMY_DATABASE_URI'] = Config.get_sqlalchemy_uri()
 
     db.init_app(app)
     with app.app_context():
@@ -101,9 +30,9 @@ def init_db(app):
             try:
                 db.session.execute(db.text("ALTER TABLE users ADD COLUMN name VARCHAR(100) NULL;"))
                 db.session.commit()
-                logger.info("Migrated 'users' table: added 'name' column.")
+                logger.info("Migrated 'users' table: added 'name' column if missing.")
             except Exception:
-                db.session.rollback()  # Column already exists
+                db.session.rollback()  # Column already exists or up-to-date
 
             logger.info("All MySQL database tables initialized & verified successfully.")
         except Exception as e:

@@ -11,9 +11,9 @@ from dotenv import load_dotenv
 # Base directory of the project
 BASE_DIR = Path(__file__).resolve().parent
 
-# Explicitly load .env file from base directory
+# Explicitly load .env file from base directory if present (do NOT override environment variables set by Render)
 env_path = BASE_DIR / '.env'
-load_dotenv(dotenv_path=env_path, override=True)
+load_dotenv(dotenv_path=env_path, override=False)
 
 
 class Config:
@@ -24,12 +24,37 @@ class Config:
     FLASK_ENV = os.getenv('FLASK_ENV', 'development')
     FLASK_PORT = int(os.getenv('FLASK_PORT', 5000))
 
-    # MySQL Database Connection Parameters
-    DB_USER = os.getenv('DB_USER', 'root')
-    DB_PASSWORD = os.getenv('DB_PASSWORD', '')
-    DB_HOST = os.getenv('DB_HOST', 'localhost')
-    DB_PORT = int(os.getenv('DB_PORT', 3306))
-    DB_NAME = os.getenv('DB_NAME', 'cloud_anomaly_db')
+    # MySQL Database Connection Parameters (Sanitized for Render & Aiven MySQL)
+    DB_USER = os.getenv('DB_USER', 'root').strip()
+    DB_PASSWORD = os.getenv('DB_PASSWORD', '').strip()
+
+    # Sanitize DB_HOST (handles accidental schemes like mysql:// or embedded ports like host:port)
+    raw_host = os.getenv('DB_HOST', 'localhost').strip()
+    if '://' in raw_host:
+        raw_host = raw_host.split('://')[-1]
+    raw_host = raw_host.split('/')[0].split('?')[0]
+
+    default_port = 3306
+    if ':' in raw_host:
+        parts = raw_host.split(':')
+        raw_host = parts[0]
+        try:
+            default_port = int(parts[1])
+        except ValueError:
+            pass
+
+    DB_HOST = raw_host
+
+    raw_port = os.getenv('DB_PORT', '')
+    if raw_port and str(raw_port).strip():
+        try:
+            DB_PORT = int(str(raw_port).strip())
+        except ValueError:
+            DB_PORT = default_port
+    else:
+        DB_PORT = default_port
+
+    DB_NAME = os.getenv('DB_NAME', 'defaultdb').strip()
 
     @classmethod
     def get_sqlalchemy_uri(cls, override_password=None):
@@ -41,9 +66,18 @@ class Config:
             return f"mysql+pymysql://{cls.DB_USER}@{cls.DB_HOST}:{cls.DB_PORT}/{cls.DB_NAME}"
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # Configure SQLAlchemy with PyMySQL and SSL/TLS required by Aiven MySQL
+    _ssl_config = {}
+    if DB_HOST not in ('localhost', '127.0.0.1'):
+        _ssl_config = {'ssl_mode': 'REQUIRED'}
+
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_recycle': 280,
-        'pool_pre_ping': True
+        'pool_pre_ping': True,
+        'connect_args': {
+            'ssl': _ssl_config
+        } if _ssl_config else {}
     }
 
     # Directories
@@ -69,6 +103,7 @@ class Config:
         cls.MODELS_DIR.mkdir(parents=True, exist_ok=True)
         cls.LOGS_DIR.mkdir(parents=True, exist_ok=True)
         cls.DELIVERABLES_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # Define static attribute after class creation
 Config.SQLALCHEMY_DATABASE_URI = Config.get_sqlalchemy_uri()
