@@ -1,0 +1,11 @@
+[
+    "Protocol",
+    "Port",
+    "Packets",
+    "Bytes",
+    "Request Count",
+    "Login Attempts",
+    "CPU Usage",
+    "Memory Usage",
+    "Response Time"
+]
