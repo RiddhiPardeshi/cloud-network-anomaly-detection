@@ -34,25 +34,27 @@ class Config:
         raw_host = raw_host.split('://')[-1]
     raw_host = raw_host.split('/')[0].split('?')[0]
 
-    default_port = 3306
+    extracted_port = None
     if ':' in raw_host:
         parts = raw_host.split(':')
         raw_host = parts[0]
         try:
-            default_port = int(parts[1])
+            extracted_port = int(parts[1])
         except ValueError:
             pass
 
     DB_HOST = raw_host
 
-    raw_port = os.getenv('DB_PORT', '')
-    if raw_port and str(raw_port).strip():
+    raw_port = os.getenv('DB_PORT', '').strip()
+    if raw_port:
         try:
-            DB_PORT = int(str(raw_port).strip())
+            DB_PORT = int(raw_port)
         except ValueError:
-            DB_PORT = default_port
+            DB_PORT = extracted_port or 3306
+    elif extracted_port:
+        DB_PORT = extracted_port
     else:
-        DB_PORT = default_port
+        DB_PORT = 3306
 
     DB_NAME = os.getenv('DB_NAME', 'defaultdb').strip()
 
@@ -70,7 +72,7 @@ class Config:
     # Configure SQLAlchemy with PyMySQL and SSL/TLS required by Aiven MySQL
     _ssl_config = {}
     if DB_HOST not in ('localhost', '127.0.0.1'):
-        _ssl_config = {'ssl_mode': 'REQUIRED'}
+        _ssl_config = {'ssl_mode': 'REQUIRED', 'check_hostname': False}
 
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_recycle': 280,

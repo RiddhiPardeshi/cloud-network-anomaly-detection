@@ -47,7 +47,7 @@ const Register = () => {
     } catch (err) {
       console.error('Registration error:', err);
       setError(
-        err.response?.data?.error || 'Registration failed. Username or Email may already exist.'
+        err.response?.data?.error || err.message || 'Registration failed. Please check network connection or database configuration.'
       );
     } finally {
       setLoading(false);
@@ -91,6 +91,7 @@ const Register = () => {
               borderRadius: '8px',
               fontSize: '0.85rem',
               marginBottom: '1.25rem',
+              wordBreak: 'break-word',
             }}
           >
             ⚠️ {error}

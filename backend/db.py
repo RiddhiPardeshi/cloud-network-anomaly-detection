@@ -36,8 +36,11 @@ def init_db(app):
 
             logger.info("All MySQL database tables initialized & verified successfully.")
         except Exception as e:
-            logger.error(f"Error initializing MySQL database tables: {e}")
-            raise e
+            logger.error(f"MySQL Database connection/initialization error: {e}")
+            logger.warning(
+                "App started, but MySQL tables could not be verified on startup. "
+                "Please verify Render Environment Variables (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME)."
+            )
 
 
 # ============================================================================

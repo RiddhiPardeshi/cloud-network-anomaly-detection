@@ -64,17 +64,28 @@ def register():
         if not password or len(password) < 6:
             return jsonify({'error': 'Password must be at least 6 characters long.'}), 400
 
-        # Check for duplicate username
-        existing_username = User.query.filter_by(username=username).first()
-        if existing_username:
-            logger.warning(f"Registration conflict: Username '{username}' already exists.")
-            return jsonify({'error': 'Username already registered.'}), 409
+        # Ensure database tables exist before querying
+        try:
+            db.create_all()
+        except Exception as table_err:
+            logger.warning(f"Table verification in register: {table_err}")
 
-        # Check for duplicate email
-        existing_email = User.query.filter_by(email=email).first()
-        if existing_email:
-            logger.warning(f"Registration conflict: Email '{email}' already exists.")
-            return jsonify({'error': 'Email address already registered.'}), 409
+        # Check for duplicate username / email
+        try:
+            existing_username = User.query.filter_by(username=username).first()
+            if existing_username:
+                logger.warning(f"Registration conflict: Username '{username}' already exists.")
+                return jsonify({'error': 'Username already registered. Please login or choose a different username.'}), 409
+
+            existing_email = User.query.filter_by(email=email).first()
+            if existing_email:
+                logger.warning(f"Registration conflict: Email '{email}' already exists.")
+                return jsonify({'error': 'Email address already registered. Please login or use a different email.'}), 409
+        except Exception as query_err:
+            logger.error(f"Database query error during registration check: {query_err}")
+            return jsonify({
+                'error': f'Database Connection Error: Unable to query MySQL ({str(query_err)}). Please verify Render Environment Variables (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME).'
+            }), 500
 
         # Hash password securely using werkzeug.security
         hashed_pw = generate_password_hash(password)
@@ -101,7 +112,7 @@ def register():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Internal error during registration: {e}", exc_info=True)
-        return jsonify({'error': 'An internal server error occurred during registration.'}), 500
+        return jsonify({'error': f'Registration Error: {str(e)}'}), 500
 
 
 @auth_bp.route('/login', methods=['POST'])
@@ -123,10 +134,22 @@ def login():
 
         login_identifier = login_identifier.strip()
 
+        # Ensure database tables exist before querying
+        try:
+            db.create_all()
+        except Exception as table_err:
+            logger.warning(f"Table verification in login: {table_err}")
+
         # Find user by username or email
-        user = User.query.filter(
-            (User.username == login_identifier) | (User.email == login_identifier.lower())
-        ).first()
+        try:
+            user = User.query.filter(
+                (User.username == login_identifier) | (User.email == login_identifier.lower())
+            ).first()
+        except Exception as query_err:
+            logger.error(f"Database query error during login check: {query_err}")
+            return jsonify({
+                'error': f'Database Connection Error: Unable to query MySQL ({str(query_err)}). Please verify Render Environment Variables (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME).'
+            }), 500
 
         if not user or not check_password_hash(user.password_hash, password):
             logger.warning(f"Failed login attempt for identifier: '{login_identifier}' from IP: {request.remote_addr}")
@@ -147,7 +170,7 @@ def login():
 
     except Exception as e:
         logger.error(f"Internal error during login: {e}", exc_info=True)
-        return jsonify({'error': 'An internal server error occurred during login.'}), 500
+        return jsonify({'error': f'Login Error: {str(e)}'}), 500
 
 
 @auth_bp.route('/me', methods=['GET'])
@@ -160,14 +183,17 @@ def get_current_user():
     if not user_id:
         return jsonify({'error': 'Unauthorized. Please log in first.'}), 401
 
-    user = User.query.get(user_id)
-    if not user:
-        session.clear()
-        return jsonify({'error': 'Authenticated user not found.'}), 404
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            session.clear()
+            return jsonify({'error': 'Authenticated user not found.'}), 404
 
-    return jsonify({
-        'user': user.to_dict()
-    }), 200
+        return jsonify({
+            'user': user.to_dict()
+        }), 200
+    except Exception as e:
+        return jsonify({'error': f'Database Error: {str(e)}'}), 500
 
 
 @auth_bp.route('/logout', methods=['POST'])
