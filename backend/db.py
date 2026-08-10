@@ -15,9 +15,10 @@ logger = logging.getLogger(__name__)
 
 
 def init_db(app):
-    """Initialize database connection and create all registered tables safely for production."""
+    """Initialize database connection and create all registered tables safely."""
     from config import Config
-    app.config['SQLALCHEMY_DATABASE_URI'] = Config.get_sqlalchemy_uri()
+    uri = Config.get_sqlalchemy_uri()
+    app.config['SQLALCHEMY_DATABASE_URI'] = uri
 
     db.init_app(app)
     with app.app_context():
@@ -32,15 +33,11 @@ def init_db(app):
                 db.session.commit()
                 logger.info("Migrated 'users' table: added 'name' column if missing.")
             except Exception:
-                db.session.rollback()  # Column already exists or up-to-date
+                db.session.rollback()
 
-            logger.info("All MySQL database tables initialized & verified successfully.")
+            logger.info(f"Database initialized successfully using: {uri.split('@')[-1] if '@' in uri else uri}")
         except Exception as e:
-            logger.error(f"MySQL Database connection/initialization error: {e}")
-            logger.warning(
-                "App started, but MySQL tables could not be verified on startup. "
-                "Please verify Render Environment Variables (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME)."
-            )
+            logger.error(f"Database initialization error: {e}")
 
 
 # ============================================================================
@@ -77,7 +74,7 @@ class TelemetryLog(db.Model):
     """
     __tablename__ = 'telemetry_logs'
 
-    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     source_ip = db.Column(db.String(45), nullable=False, index=True)
     destination_ip = db.Column(db.String(45), default='10.0.0.1')
@@ -139,8 +136,8 @@ class PredictionLog(db.Model):
     """Real-time ML anomaly prediction audit log table."""
     __tablename__ = 'prediction_logs'
 
-    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
-    telemetry_id = db.Column(db.BigInteger, db.ForeignKey('telemetry_logs.id'), nullable=True)
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    telemetry_id = db.Column(db.Integer, db.ForeignKey('telemetry_logs.id'), nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     source_ip = db.Column(db.String(45), nullable=False, index=True)
     attack_type = db.Column(db.String(50), nullable=False)  # Normal, DDoS, Port Scan, Brute Force, Malicious Payload

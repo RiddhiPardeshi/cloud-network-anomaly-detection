@@ -93,13 +93,13 @@ class CloudTrafficSimulator:
             source_ip = random.choice(self.ip_pools['DDoS'])
             protocol = random.choice(['TCP', 'UDP'])
             port = random.choice([80, 443])
-            packets = random.randint(1200, 9000)
-            bytes_cnt = random.randint(50000, 600000)
-            req_cnt = random.randint(200, 2000)
+            packets = random.randint(3000, 15000)
+            bytes_cnt = random.randint(100000, 800000)
+            req_cnt = random.randint(400, 3000)
             login_att = 0
-            cpu = round(random.uniform(80.0, 99.9), 2)
-            mem = round(random.uniform(75.0, 95.0), 2)
-            resp_time = round(random.uniform(500.0, 3500.0), 2)
+            cpu = round(random.uniform(85.0, 99.9), 2)
+            mem = round(random.uniform(80.0, 98.0), 2)
+            resp_time = round(random.uniform(800.0, 4000.0), 2)
 
         elif attack_type == 'Port Scan':
             source_ip = random.choice(self.ip_pools['Port Scan'])
@@ -120,22 +120,22 @@ class CloudTrafficSimulator:
             packets = random.randint(15, 90)
             bytes_cnt = random.randint(1500, 9500)
             req_cnt = random.randint(20, 100)
-            login_att = random.randint(10, 150)
-            cpu = round(random.uniform(45.0, 80.0), 2)
+            login_att = random.randint(15, 150)
+            cpu = round(random.uniform(50.0, 85.0), 2)
             mem = round(random.uniform(40.0, 70.0), 2)
-            resp_time = round(random.uniform(150.0, 700.0), 2)
+            resp_time = round(random.uniform(200.0, 800.0), 2)
 
         elif attack_type == 'Malicious Payload':
             source_ip = random.choice(self.ip_pools['Malicious Payload'])
             protocol = 'HTTP'
             port = random.choice([80, 443, 8080])
             packets = random.randint(60, 350)
-            bytes_cnt = random.randint(20000, 120000)
+            bytes_cnt = random.randint(60000, 300000)
             req_cnt = random.randint(5, 35)
             login_att = random.randint(0, 3)
-            cpu = round(random.uniform(55.0, 90.0), 2)
+            cpu = round(random.uniform(65.0, 95.0), 2)
             mem = round(random.uniform(55.0, 85.0), 2)
-            resp_time = round(random.uniform(300.0, 1500.0), 2)
+            resp_time = round(random.uniform(500.0, 2000.0), 2)
 
         else:
             source_ip = generate_random_ip("192.168")
@@ -414,22 +414,38 @@ def stop_simulator():
 def get_simulator_status():
     """
     GET /api/simulator/status
-    Get real-time simulator status and execution counters.
+    Get real-time simulator status and execution counters backed by actual database records.
     """
     try:
         is_running = traffic_simulator.is_running
-        stats = traffic_simulator.stats
+        t_count = db.session.query(db.func.count(TelemetryLog.id)).scalar() or 0
+        p_attacks = db.session.query(db.func.count(PredictionLog.id)).filter(PredictionLog.is_attack == True).scalar() or 0
+        p_normals = db.session.query(db.func.count(PredictionLog.id)).filter(PredictionLog.is_attack == False).scalar() or 0
+        b_count = db.session.query(db.func.count(BlockedIP.id)).filter(BlockedIP.is_active == True).scalar() or 0
+
+        # Update in-memory stats cache as well
+        traffic_simulator.stats['total_generated'] = t_count
+        traffic_simulator.stats['normal_generated'] = p_normals
+        traffic_simulator.stats['attacks_generated'] = p_attacks
+        traffic_simulator.stats['auto_blocks_triggered'] = b_count
+
         return jsonify({
             'status': 'running' if is_running else 'stopped',
             'is_running': is_running,
             'scenario': traffic_simulator.scenario,
             'rate_per_sec': traffic_simulator.rate_per_sec,
             'duration_seconds': traffic_simulator.duration_seconds,
-            'total_generated': stats.get('total_generated', 0),
-            'normal_events': stats.get('normal_generated', 0),
-            'attack_events': stats.get('attacks_generated', 0),
-            'blocked_ips': stats.get('auto_blocks_triggered', 0),
-            'stats': stats
+            'total_generated': t_count,
+            'normal_events': p_normals,
+            'attack_events': p_attacks,
+            'blocked_ips': b_count,
+            'stats': {
+                'total_generated': t_count,
+                'normal_generated': p_normals,
+                'attacks_generated': p_attacks,
+                'auto_blocks_triggered': b_count,
+                'scenario_breakdown': traffic_simulator.stats.get('scenario_breakdown', {})
+            }
         }), 200
 
     except Exception as e:
@@ -457,9 +473,32 @@ def trigger_single_attack():
         app_obj = current_app._get_current_object()
         result = traffic_simulator.process_single_simulation_step(target_scenario=attack_type, flask_app=app_obj)
 
+        auto_blocked = bool(result.get('auto_mitigation_triggered'))
+
+        pipeline_res = {
+            'prediction': 'Attack' if result['is_attack'] else 'Normal',
+            'is_attack': result['is_attack'],
+            'confidence': result['confidence'],
+            'risk_score': result['risk_score'],
+            'risk_level': result['risk_category'],
+            'risk_category': result['risk_category'],
+            'source_ip': result['source_ip'],
+            'attack_type': result['attack_type'],
+            'auto_mitigation_triggered': auto_blocked,
+            'block_status': 'IP Blocked' if auto_blocked else 'Monitoring Only',
+            'mitigation_result': {
+                'action_taken': 'blocked' if auto_blocked else 'monitored',
+                'threshold_applied': Config.RISK_THRESHOLD_CRITICAL,
+                'source_ip': result['source_ip']
+            },
+            'telemetry_id': result['telemetry_id'],
+            'prediction_id': result['prediction_id'],
+            'explanation': result['explanation']
+        }
+
         return jsonify({
             'message': f"Single attack scenario '{attack_type}' injected and processed successfully.",
-            'pipeline_result': result
+            'pipeline_result': pipeline_res
         }), 201
 
     except Exception as e:

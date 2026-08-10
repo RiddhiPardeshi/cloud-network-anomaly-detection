@@ -9,7 +9,12 @@ const Simulator = () => {
   const [duration, setDuration] = useState(60);
   const [selectedInject, setSelectedInject] = useState('DDoS');
   const [injectionResult, setInjectionResult] = useState(null);
-  const [message, setMessage] = useState('');
+  
+  // Separate status messages & error messages for continuous simulation vs instant injection
+  const [continuousMessage, setContinuousMessage] = useState('');
+  const [continuousError, setContinuousError] = useState('');
+  const [injectionMessage, setInjectionMessage] = useState('');
+  const [injectionError, setInjectionError] = useState('');
 
   const fetchSimulatorStatus = async () => {
     try {
@@ -29,42 +34,55 @@ const Simulator = () => {
   }, []);
 
   const handleStart = async () => {
+    setContinuousMessage('');
+    setContinuousError('');
     try {
       const res = await apiClient.post('/api/simulator/start', {
         scenario,
         rate: parseFloat(rate),
         duration: parseInt(duration, 10),
       });
-      setMessage(res.data.message);
-      fetchSimulatorStatus();
+      setContinuousMessage(res.data.message || 'Continuous background simulator started.');
+      await fetchSimulatorStatus();
     } catch (err) {
       console.error('Failed to start simulator:', err);
-      setMessage(err.response?.data?.error || 'Failed to start simulator.');
+      const errMsg = err.response?.data?.error || err.response?.data?.details || 'Failed to start simulator.';
+      setContinuousError(errMsg);
     }
   };
 
   const handleStop = async () => {
+    setContinuousMessage('');
+    setContinuousError('');
     try {
       const res = await apiClient.post('/api/simulator/stop');
-      setMessage(res.data.message);
-      fetchSimulatorStatus();
+      setContinuousMessage(res.data.message || 'Continuous background simulator stopped.');
+      await fetchSimulatorStatus();
     } catch (err) {
       console.error('Failed to stop simulator:', err);
-      setMessage('Failed to stop simulator.');
+      const errMsg = err.response?.data?.error || err.response?.data?.details || 'Failed to stop simulator.';
+      setContinuousError(errMsg);
     }
   };
 
   const handleTriggerAttack = async () => {
+    setInjectionMessage('');
+    setInjectionError('');
     try {
       const res = await apiClient.post('/api/simulator/trigger-attack', {
         attack_type: selectedInject,
       });
-      setInjectionResult(res.data.pipeline_result);
-      setMessage(`Successfully injected attack scenario: ${selectedInject}`);
-      fetchSimulatorStatus();
+      const data = res.data;
+      const resResult = data.pipeline_result || data;
+      setInjectionResult(resResult);
+      setInjectionMessage(data.message || `Successfully injected attack scenario: ${selectedInject}`);
+      
+      // Refresh KPI counters immediately after successful injection
+      await fetchSimulatorStatus();
     } catch (err) {
       console.error('Failed to inject attack:', err);
-      setMessage('Failed to inject attack scenario.');
+      const errMsg = err.response?.data?.error || err.response?.data?.details || err.message || 'Failed to inject attack scenario.';
+      setInjectionError(errMsg);
     }
   };
 
@@ -85,23 +103,7 @@ const Simulator = () => {
         </div>
       </div>
 
-      {message && (
-        <div
-          style={{
-            background: 'rgba(0, 242, 254, 0.1)',
-            border: '1px solid var(--accent-cyan)',
-            color: 'var(--accent-cyan)',
-            padding: '0.85rem 1.25rem',
-            borderRadius: '8px',
-            marginBottom: '1.5rem',
-            fontSize: '0.9rem',
-          }}
-        >
-          💡 {message}
-        </div>
-      )}
-
-      {/* Simulator Execution Counters Grid */}
+      {/* Simulator Execution Counters Grid (Database Backed) */}
       <div className="kpi-grid">
         <KPICard
           title="Total Generated"
@@ -140,6 +142,38 @@ const Simulator = () => {
           <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1.25rem' }}>
             ⚙️ Continuous Background Simulation
           </h3>
+
+          {continuousMessage && (
+            <div
+              style={{
+                background: 'rgba(0, 242, 254, 0.1)',
+                border: '1px solid var(--accent-cyan)',
+                color: 'var(--accent-cyan)',
+                padding: '0.75rem 1rem',
+                borderRadius: '6px',
+                marginBottom: '1rem',
+                fontSize: '0.85rem',
+              }}
+            >
+              💡 {continuousMessage}
+            </div>
+          )}
+
+          {continuousError && (
+            <div
+              style={{
+                background: 'rgba(255, 75, 75, 0.15)',
+                border: '1px solid var(--accent-red)',
+                color: 'var(--accent-red)',
+                padding: '0.75rem 1rem',
+                borderRadius: '6px',
+                marginBottom: '1rem',
+                fontSize: '0.85rem',
+              }}
+            >
+              ⚠️ {continuousError}
+            </div>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
@@ -216,6 +250,38 @@ const Simulator = () => {
             💥 Instant Scenario Injection
           </h3>
 
+          {injectionMessage && (
+            <div
+              style={{
+                background: 'rgba(0, 242, 254, 0.1)',
+                border: '1px solid var(--accent-cyan)',
+                color: 'var(--accent-cyan)',
+                padding: '0.75rem 1rem',
+                borderRadius: '6px',
+                marginBottom: '1rem',
+                fontSize: '0.85rem',
+              }}
+            >
+              💡 {injectionMessage}
+            </div>
+          )}
+
+          {injectionError && (
+            <div
+              style={{
+                background: 'rgba(255, 75, 75, 0.15)',
+                border: '1px solid var(--accent-red)',
+                color: 'var(--accent-red)',
+                padding: '0.75rem 1rem',
+                borderRadius: '6px',
+                marginBottom: '1rem',
+                fontSize: '0.85rem',
+              }}
+            >
+              ⚠️ {injectionError}
+            </div>
+          )}
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
@@ -251,14 +317,26 @@ const Simulator = () => {
                 <div style={{ fontWeight: 600, color: 'var(--accent-cyan)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
                   PIPELINE EXECUTION RESULT:
                 </div>
-                <div className="font-mono" style={{ fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                  <div>Source IP: {injectionResult.source_ip}</div>
-                  <div>Attack Type: {injectionResult.attack_type}</div>
-                  <div>Confidence: {(injectionResult.confidence * 100).toFixed(2)}%</div>
-                  <div>Risk Score: {injectionResult.risk_score} ({injectionResult.risk_category})</div>
+                <div className="font-mono" style={{ fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  <div>Source IP: <span style={{ color: '#fff' }}>{injectionResult.source_ip}</span></div>
+                  <div>Attack Type: <span style={{ color: '#fff' }}>{injectionResult.attack_type}</span></div>
+                  <div>Prediction: <span style={{ color: injectionResult.is_attack ? 'var(--accent-red)' : 'var(--accent-green)', fontWeight: 700 }}>
+                    {injectionResult.prediction || (injectionResult.is_attack ? 'Attack' : 'Normal')}
+                  </span></div>
+                  <div>Confidence: <span style={{ color: '#fff' }}>
+                    {injectionResult.confidence !== undefined ? (injectionResult.confidence * 100).toFixed(2) + '%' : '100.00%'}
+                  </span></div>
+                  <div>Risk Score: <span style={{ color: injectionResult.risk_score >= 81 ? 'var(--accent-red)' : injectionResult.risk_score >= 51 ? 'var(--accent-amber)' : 'var(--accent-green)', fontWeight: 700 }}>
+                    {injectionResult.risk_score} ({injectionResult.risk_level || injectionResult.risk_category || 'Safe'})
+                  </span></div>
                   <div>
-                    Auto Block: {injectionResult.auto_mitigation_triggered ? '🔒 YES (BLOCKED)' : '👁️ NO (SAFE)'}
+                    Auto Block: <span style={{ fontWeight: 700 }}>
+                      {injectionResult.auto_mitigation_triggered ? '🔒 YES (BLOCKED)' : '👁️ NO (SAFE)'}
+                    </span>
                   </div>
+                  <div>Block Status: <span style={{ color: 'var(--text-secondary)' }}>
+                    {injectionResult.block_status || (injectionResult.auto_mitigation_triggered ? 'IP Blocked' : 'Monitoring Only')}
+                  </span></div>
                 </div>
               </div>
             )}

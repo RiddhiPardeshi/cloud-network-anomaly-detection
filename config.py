@@ -25,11 +25,11 @@ class Config:
     FLASK_PORT = int(os.getenv('FLASK_PORT', 5000))
 
     # MySQL Database Connection Parameters (Sanitized for Render & Aiven MySQL)
-    DB_USER = os.getenv('DB_USER', 'root').strip()
-    DB_PASSWORD = os.getenv('DB_PASSWORD', '').strip()
+    DB_USER = os.getenv('DB_USER', 'root').strip().strip("'").strip('"')
+    DB_PASSWORD = os.getenv('DB_PASSWORD', '').strip().strip("'").strip('"')
 
-    # Sanitize DB_HOST (handles accidental schemes like mysql:// or embedded ports like host:port)
-    raw_host = os.getenv('DB_HOST', 'localhost').strip()
+    # Sanitize DB_HOST (handles accidental schemes like mysql:// or embedded ports like host:port or quotes)
+    raw_host = os.getenv('DB_HOST', 'localhost').strip().strip("'").strip('"')
     if '://' in raw_host:
         raw_host = raw_host.split('://')[-1]
     raw_host = raw_host.split('/')[0].split('?')[0]
@@ -43,9 +43,9 @@ class Config:
         except ValueError:
             pass
 
-    DB_HOST = raw_host
+    DB_HOST = raw_host.strip().strip("'").strip('"')
 
-    raw_port = os.getenv('DB_PORT', '').strip()
+    raw_port = os.getenv('DB_PORT', '').strip().strip("'").strip('"')
     if raw_port:
         try:
             DB_PORT = int(raw_port)
@@ -56,16 +56,47 @@ class Config:
     else:
         DB_PORT = 3306
 
-    DB_NAME = os.getenv('DB_NAME', 'defaultdb').strip()
+    DB_NAME = os.getenv('DB_NAME', 'defaultdb').strip().strip("'").strip('"')
 
     @classmethod
     def get_sqlalchemy_uri(cls, override_password=None):
+        if os.getenv('USE_SQLITE', '').lower() == 'true':
+            sqlite_path = cls.BASE_DIR / 'cloud_anomaly.db'
+            return f"sqlite:///{sqlite_path}"
+
         pwd = override_password if override_password is not None else cls.DB_PASSWORD
         encoded_pwd = quote_plus(pwd) if pwd else ''
         if encoded_pwd:
-            return f"mysql+pymysql://{cls.DB_USER}:{encoded_pwd}@{cls.DB_HOST}:{cls.DB_PORT}/{cls.DB_NAME}"
+            mysql_uri = f"mysql+pymysql://{cls.DB_USER}:{encoded_pwd}@{cls.DB_HOST}:{cls.DB_PORT}/{cls.DB_NAME}"
         else:
-            return f"mysql+pymysql://{cls.DB_USER}@{cls.DB_HOST}:{cls.DB_PORT}/{cls.DB_NAME}"
+            mysql_uri = f"mysql+pymysql://{cls.DB_USER}@{cls.DB_HOST}:{cls.DB_PORT}/{cls.DB_NAME}"
+
+        # For localhost testing, verify if MySQL is reachable; if not, fallback to SQLite safely
+        if cls.DB_HOST in ('localhost', '127.0.0.1'):
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1.0)
+                res = sock.connect_ex(('127.0.0.1', cls.DB_PORT))
+                sock.close()
+                if res != 0:
+                    sqlite_path = cls.BASE_DIR / 'cloud_anomaly.db'
+                    return f"sqlite:///{sqlite_path}"
+
+                import pymysql
+                conn = pymysql.connect(
+                    host='127.0.0.1',
+                    port=cls.DB_PORT,
+                    user=cls.DB_USER,
+                    password=pwd,
+                    connect_timeout=1.0
+                )
+                conn.close()
+            except Exception:
+                sqlite_path = cls.BASE_DIR / 'cloud_anomaly.db'
+                return f"sqlite:///{sqlite_path}"
+
+        return mysql_uri
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 

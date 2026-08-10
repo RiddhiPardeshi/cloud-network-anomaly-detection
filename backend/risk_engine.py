@@ -23,36 +23,48 @@ logger = logging.getLogger(__name__)
 
 def calculate_risk_score(is_attack, confidence, raw_telemetry):
     """
-    Computes a deterministic 0-100 Risk Score using a hybrid mathematical model:
+    Computes a deterministic 0-100 Risk Score fusing Machine Learning prediction confidence,
+    attack prediction status, and multi-source telemetry anomaly metrics.
 
     Formula:
-    Risk = min(100.0, Base_ML_Score + Login_Factor + CPU_Factor + Packet_Factor + Byte_Factor + Request_Factor + Latency_Factor)
+    Risk = min(100.0, Base_ML_Score + Telemetry_Anomaly_Score)
 
-    Weights:
-      1. Base ML Probability Weight  : Max 50.0 points
-         - P_attack * 50.0 (where P_attack is attack probability confidence)
-      2. Login Attempt Anomaly Factor: Max 15.0 points
-         - min(15.0, (Login_Attempts / 5) * 15.0)
-      3. CPU Utilization Factor      : Max 10.0 points
-         - min(10.0, (CPU_Usage / 100) * 10.0)
-      4. Packet Volume Factor        : Max 10.0 points
-         - min(10.0, (Packets / 5000) * 10.0)
-      5. Byte Transfer Size Factor   : Max 5.0 points
-         - min(5.0, (Bytes / 200000) * 5.0)
-      6. Request Count Factor        : Max 5.0 points
-         - min(5.0, (Request_Count / 500) * 5.0)
-      7. Latency Delay Factor        : Max 5.0 points
-         - min(5.0, (Response_Time / 1000) * 5.0)
+    1. Base ML Score (Max 50.0 points):
+       - If is_attack is True: P_attack * 50.0
+       - If is_attack is False: (1 - P_attack) * 5.0 (where P_attack is attack probability)
 
-    Total Maximum Cumulative Score = 100.0
+    2. Telemetry Anomaly Score (Max 50.0 points):
+       Evaluates peak anomaly intensity and top anomaly metrics:
+       - Login Attempts Anomaly Intensity  : login_att / 5.0
+       - Packet Volume Intensity           : packets / 2500.0
+       - CPU Utilization Intensity         : (cpu - 20.0) / 60.0
+       - Byte Transfer Size Intensity      : bytes / 50000.0
+       - Request Count Intensity           : req_cnt / 200.0
+       - Latency Delay Intensity           : (resp_time - 50.0) / 500.0
+
+       Telemetry Score = (Peak_Intensity * 25.0) + (Top3_Avg_Intensity * 25.0)
+
+    Total Score Range: 0.0 to 100.0
+    Categorization:
+      - 0 – 20  : Safe
+      - 21 – 50 : Low
+      - 51 – 80 : Medium
+      - 81 – 100: Critical (Triggers Auto Mitigation)
     """
     if not isinstance(raw_telemetry, dict):
         raw_telemetry = {}
 
-    # Extract & coerce telemetry values safely
-    p_attack = float(confidence) if is_attack else (1.0 - float(confidence))
+    # 1. Base ML Score
+    conf_val = float(confidence) if confidence is not None else 0.5
+    p_attack = conf_val if is_attack else (1.0 - conf_val)
     p_attack = max(0.0, min(1.0, p_attack))
 
+    if is_attack:
+        base_ml_score = p_attack * 50.0
+    else:
+        base_ml_score = (1.0 - p_attack) * 5.0
+
+    # Extract telemetry metrics
     login_att = float(raw_telemetry.get('Login Attempts', 0) or 0)
     cpu_usage = float(raw_telemetry.get('CPU Usage', 0) or 0)
     packets = float(raw_telemetry.get('Packets', 0) or 0)
@@ -60,25 +72,33 @@ def calculate_risk_score(is_attack, confidence, raw_telemetry):
     req_cnt = float(raw_telemetry.get('Request Count', 0) or 0)
     resp_time = float(raw_telemetry.get('Response Time', 0) or 0)
 
-    # Calculate component weights
-    base_ml_score = p_attack * 50.0
-    login_factor = min(15.0, (max(0.0, login_att) / 5.0) * 15.0)
-    cpu_factor = min(10.0, (max(0.0, cpu_usage) / 100.0) * 10.0)
-    packet_factor = min(10.0, (max(0.0, packets) / 5000.0) * 10.0)
-    byte_factor = min(5.0, (max(0.0, bytes_cnt) / 200000.0) * 5.0)
-    request_factor = min(5.0, (max(0.0, req_cnt) / 500.0) * 5.0)
-    latency_factor = min(5.0, (max(0.0, resp_time) / 1000.0) * 5.0)
+    # Calculate normalized anomaly intensities (0.0 to 1.0)
+    login_intensity = min(1.0, max(0.0, login_att) / 5.0)
+    packet_intensity = min(1.0, max(0.0, packets) / 2500.0)
+    cpu_intensity = min(1.0, max(0.0, cpu_usage - 20.0) / 60.0)
+    byte_intensity = min(1.0, max(0.0, bytes_cnt) / 50000.0)
+    req_intensity = min(1.0, max(0.0, req_cnt) / 200.0)
+    latency_intensity = min(1.0, max(0.0, resp_time - 50.0) / 500.0)
 
-    raw_total = (
-        base_ml_score +
-        login_factor +
-        cpu_factor +
-        packet_factor +
-        byte_factor +
-        request_factor +
-        latency_factor
-    )
+    intensities = [
+        login_intensity,
+        packet_intensity,
+        cpu_intensity,
+        byte_intensity,
+        req_intensity,
+        latency_intensity
+    ]
+    intensities_sorted = sorted(intensities, reverse=True)
 
+    peak_intensity = intensities_sorted[0]
+    top3_avg_intensity = sum(intensities_sorted[:3]) / 3.0
+
+    if is_attack:
+        telemetry_score = (peak_intensity * 25.0) + (top3_avg_intensity * 25.0)
+    else:
+        telemetry_score = (peak_intensity * 10.0) + (top3_avg_intensity * 10.0)
+
+    raw_total = base_ml_score + telemetry_score
     risk_score = round(max(0.0, min(100.0, raw_total)), 2)
 
     # Categorize Risk Level
@@ -93,12 +113,9 @@ def calculate_risk_score(is_attack, confidence, raw_telemetry):
 
     factors_breakdown = {
         'base_ml_score': round(base_ml_score, 2),
-        'login_factor': round(login_factor, 2),
-        'cpu_factor': round(cpu_factor, 2),
-        'packet_factor': round(packet_factor, 2),
-        'byte_factor': round(byte_factor, 2),
-        'request_factor': round(request_factor, 2),
-        'latency_factor': round(latency_factor, 2)
+        'telemetry_score': round(telemetry_score, 2),
+        'peak_intensity': round(peak_intensity, 2),
+        'top3_avg_intensity': round(top3_avg_intensity, 2)
     }
 
     return risk_score, category, factors_breakdown
