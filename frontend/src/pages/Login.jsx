@@ -121,6 +121,43 @@ const Login = ({ onLoginSuccess }) => {
             Register Now
           </Link>
         </div>
+
+        <div
+          style={{
+            marginTop: '1.25rem',
+            paddingTop: '1.25rem',
+            borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+            textAlign: 'center',
+          }}
+        >
+          <Link
+            to="/admin-login"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.6rem 1.2rem',
+              background: 'rgba(220, 38, 38, 0.1)',
+              border: '1px solid var(--accent-red)',
+              borderRadius: '8px',
+              color: 'var(--accent-red)',
+              textDecoration: 'none',
+              fontSize: '0.85rem',
+              fontWeight: 600,
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.background = 'rgba(220, 38, 38, 0.2)';
+              e.target.style.boxShadow = '0 0 15px rgba(220, 38, 38, 0.3)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = 'rgba(220, 38, 38, 0.1)';
+              e.target.style.boxShadow = 'none';
+            }}
+          >
+            🛡️ Admin Access Portal
+          </Link>
+        </div>
       </div>
     </div>
   );

@@ -4,9 +4,18 @@ Initializes database, CORS, configuration, and registers Blueprint modules.
 """
 
 import sys
+import logging
 from pathlib import Path
+from datetime import timedelta
 from flask import Flask, jsonify
 from flask_cors import CORS
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Add root directory to sys.path
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -21,9 +30,24 @@ def create_app():
     """Application factory for Flask backend."""
     app = Flask(__name__, static_folder="../frontend", static_url_path="")
     app.config.from_object(Config)
+    
+    # Configure Flask session
+    app.config['SECRET_KEY'] = Config.SECRET_KEY or 'dev-secret-key-please-change-in-production'
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Works for same-site requests
+    app.config['SESSION_COOKIE_SECURE'] = False  # Set True in production with HTTPS
+    app.config['SESSION_COOKIE_NAME'] = 'cloud_anomaly_session'
+    app.config['SESSION_COOKIE_DOMAIN'] = None  # Let browser handle it (works for both localhost and 127.0.0.1)
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 
     # Enable Cross-Origin Resource Sharing
-    CORS(app)
+    # Configure CORS for local development (frontend on port 3000, backend on port 5000)
+    # and production (same origin)
+    CORS(app, 
+         resources={r"/api/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173"]}},
+         supports_credentials=True,
+         allow_headers=["Content-Type", "Authorization"],
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
     # Initialize Configuration & Database
     Config.init_app(app)
@@ -37,6 +61,7 @@ def create_app():
     from backend.dashboard import dashboard_bp
     from backend.simulator import simulator_bp
     from backend.api import api_bp
+    from backend.admin import admin_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(telemetry_bp, url_prefix='/api/telemetry')
@@ -45,6 +70,7 @@ def create_app():
     app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
     app.register_blueprint(simulator_bp, url_prefix='/api/simulator')
     app.register_blueprint(api_bp, url_prefix='/api')
+    app.register_blueprint(admin_bp, url_prefix='/api/admin')
 
     @app.route('/')
     def index():

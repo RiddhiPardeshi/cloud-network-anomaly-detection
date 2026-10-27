@@ -1,17 +1,36 @@
 """
 Database Manager & SQLAlchemy ORM Models for Cloud Network Anomaly Detection.
-Supports MySQL database storage via PyMySQL with complete schema consistency.
+Supports PostgreSQL database storage with IST (Asia/Kolkata) timezone handling.
 """
 
 from datetime import datetime
 import json
 import logging
 from flask_sqlalchemy import SQLAlchemy
+import pytz
+
+# IST Timezone (Asia/Kolkata - UTC+05:30)
+IST = pytz.timezone('Asia/Kolkata')
 
 # Initialize SQLAlchemy instance
 db = SQLAlchemy()
 
 logger = logging.getLogger(__name__)
+
+
+def get_ist_now():
+    """Get current time in IST timezone."""
+    return datetime.now(IST)
+
+
+def utc_to_ist(utc_dt):
+    """Convert UTC datetime to IST."""
+    if utc_dt is None:
+        return None
+    if utc_dt.tzinfo is None:
+        # Assume UTC if naive
+        utc_dt = pytz.utc.localize(utc_dt)
+    return utc_dt.astimezone(IST)
 
 
 def init_db(app):
@@ -57,13 +76,15 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
+        # Convert UTC to IST for display
+        created_ist = utc_to_ist(self.created_at)
         return {
             'id': self.id,
             'name': self.name or self.username,
             'username': self.username,
             'email': self.email,
             'role': self.role,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': created_ist.isoformat() if created_ist else None
         }
 
 
@@ -92,9 +113,11 @@ class TelemetryLog(db.Model):
     endpoint = db.Column(db.String(100), default='index')
 
     def to_dict(self):
+        # Convert UTC to IST for display
+        timestamp_ist = utc_to_ist(self.timestamp)
         return {
             'id': self.id,
-            'Timestamp': self.timestamp.isoformat(),
+            'Timestamp': timestamp_ist.isoformat() if timestamp_ist else None,
             'Source IP': self.source_ip,
             'Destination IP': self.destination_ip,
             'Protocol': self.protocol,
@@ -116,8 +139,10 @@ class TelemetryLog(db.Model):
         Returns exact feature mapping matching Module 5 Dataset columns.
         Exact Spelling, Capitalization, and Feature Ordering.
         """
+        # Convert UTC to IST for ML features
+        timestamp_ist = utc_to_ist(self.timestamp)
         return {
-            'Timestamp': self.timestamp.isoformat(),
+            'Timestamp': timestamp_ist.isoformat() if timestamp_ist else None,
             'Source IP': self.source_ip,
             'Destination IP': self.destination_ip,
             'Protocol': self.protocol,
@@ -140,19 +165,21 @@ class PredictionLog(db.Model):
     telemetry_id = db.Column(db.Integer, db.ForeignKey('telemetry_logs.id'), nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     source_ip = db.Column(db.String(45), nullable=False, index=True)
-    attack_type = db.Column(db.String(50), nullable=False)  # Normal, DDoS, Port Scan, Brute Force, Malicious Payload
-    is_attack = db.Column(db.Boolean, nullable=False, default=False)
+    attack_type = db.Column(db.String(50), nullable=False, index=True)  # Normal, DDoS, Port Scan, Brute Force, Malicious Payload
+    is_attack = db.Column(db.Boolean, nullable=False, default=False, index=True)
     confidence = db.Column(db.Float, nullable=False, default=0.0)
     risk_score = db.Column(db.Float, nullable=False, default=0.0)
-    risk_category = db.Column(db.String(20), nullable=False, default='Safe')
+    risk_category = db.Column(db.String(20), nullable=False, default='Safe', index=True)
     top_features_json = db.Column(db.Text, nullable=True)
     explanation = db.Column(db.Text, nullable=True)
 
     def to_dict(self):
+        # Convert UTC to IST for display
+        timestamp_ist = utc_to_ist(self.timestamp)
         return {
             'id': self.id,
             'telemetry_id': self.telemetry_id,
-            'Timestamp': self.timestamp.isoformat(),
+            'Timestamp': timestamp_ist.isoformat() if timestamp_ist else None,
             'Source IP': self.source_ip,
             'Attack Type': self.attack_type,
             'is_attack': self.is_attack,
@@ -171,16 +198,18 @@ class BlockedIP(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     ip_address = db.Column(db.String(45), unique=True, nullable=False, index=True)
     reason = db.Column(db.String(255), nullable=False)
-    blocked_at = db.Column(db.DateTime, default=datetime.utcnow)
+    blocked_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     risk_score = db.Column(db.Float, nullable=False)
-    is_active = db.Column(db.Boolean, default=True)
+    is_active = db.Column(db.Boolean, default=True, index=True)
 
     def to_dict(self):
+        # Convert UTC to IST for display
+        blocked_ist = utc_to_ist(self.blocked_at)
         return {
             'id': self.id,
             'ip_address': self.ip_address,
             'reason': self.reason,
-            'blocked_at': self.blocked_at.isoformat(),
+            'blocked_at': blocked_ist.isoformat() if blocked_ist else None,
             'risk_score': self.risk_score,
             'is_active': self.is_active
         }
@@ -200,9 +229,11 @@ class AttackAlert(db.Model):
     details_json = db.Column(db.Text, nullable=True)
 
     def to_dict(self):
+        # Convert UTC to IST for display
+        timestamp_ist = utc_to_ist(self.timestamp)
         return {
             'id': self.id,
-            'timestamp': self.timestamp.isoformat(),
+            'timestamp': timestamp_ist.isoformat() if timestamp_ist else None,
             'source_ip': self.source_ip,
             'attack_type': self.attack_type,
             'risk_score': self.risk_score,

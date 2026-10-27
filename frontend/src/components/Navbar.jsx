@@ -51,6 +51,13 @@ const Navbar = ({ user, onLogout }) => {
             💻 System Health
           </NavLink>
         </li>
+        {user?.role === 'admin' && (
+          <li className="nav-item">
+            <NavLink to="/admin" className={({ isActive }) => (isActive ? 'active' : '')}>
+              🔐 Admin Panel
+            </NavLink>
+          </li>
+        )}
       </ul>
 
       <div style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)' }}>

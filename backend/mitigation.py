@@ -16,20 +16,24 @@ mitigation_bp = Blueprint('mitigation', __name__)
 logger = logging.getLogger(__name__)
 
 
-def trigger_automatic_mitigation(source_ip, attack_type, risk_score, confidence, top_features=None, dest_ip='10.0.0.1'):
+def trigger_automatic_mitigation(source_ip, attack_type, risk_score, confidence, top_features=None, dest_ip='10.0.0.1', skip_commit=False, skip_query=False):
     """
     Automated Mitigation Engine Action:
     Triggers when Risk Score >= 81 (Critical Risk).
     1. Blocks Source IP in BlockedIP table.
     2. Dispatches SMTP email alert.
     3. Logs incident record in AttackAlert table.
+    
+    Args:
+        skip_commit: If True, caller is responsible for committing the transaction
+        skip_query: If True, assume IP is new (skip query, use INSERT directly)
     """
     if top_features is None:
         top_features = []
 
-    # 1. Block Source IP in database if not already blocked
-    blocked_entry = BlockedIP.query.filter_by(ip_address=source_ip).first()
-    if not blocked_entry:
+    # 1. Block Source IP in database
+    if skip_query:
+        # Assume it's a new IP, create directly
         blocked_entry = BlockedIP(
             ip_address=source_ip,
             reason=f"Automated Block: Critical {attack_type} Threat Detected",
@@ -38,10 +42,23 @@ def trigger_automatic_mitigation(source_ip, attack_type, risk_score, confidence,
         )
         db.session.add(blocked_entry)
     else:
-        blocked_entry.is_active = True
-        blocked_entry.reason = f"Automated Re-Block: Critical {attack_type} Threat"
-        blocked_entry.risk_score = risk_score
-        blocked_entry.blocked_at = datetime.utcnow()
+        # Query to check if IP already blocked
+        blocked_entry = BlockedIP.query.filter_by(ip_address=source_ip).first()
+        
+        if not blocked_entry:
+            blocked_entry = BlockedIP(
+                ip_address=source_ip,
+                reason=f"Automated Block: Critical {attack_type} Threat Detected",
+                risk_score=risk_score,
+                is_active=True
+            )
+            db.session.add(blocked_entry)
+        else:
+            # Update existing entry
+            blocked_entry.is_active = True
+            blocked_entry.reason = f"Automated Re-Block: Critical {attack_type} Threat"
+            blocked_entry.risk_score = risk_score
+            blocked_entry.blocked_at = datetime.utcnow()
 
     # 2. Dispatch SMTP Security Email Alert
     alert_payload = {
@@ -67,9 +84,12 @@ def trigger_automatic_mitigation(source_ip, attack_type, risk_score, confidence,
         details_json=json.dumps(alert_payload)
     )
     db.session.add(alert_entry)
-    db.session.commit()
+    
+    # Only commit if caller hasn't disabled it (for batching)
+    if not skip_commit:
+        db.session.commit()
 
-    logger.info(f"Automated mitigation executed for IP={source_ip}: Blocked=True, Alert_ID={alert_entry.id}, Email={email_sent}")
+    logger.info(f"Automated mitigation executed for IP={source_ip}: Blocked=True, Alert_ID={alert_entry.id if skip_commit else 'pending'}, Email={email_sent}")
     return blocked_entry, alert_entry, email_sent
 
 

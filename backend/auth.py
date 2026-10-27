@@ -1,10 +1,12 @@
 """
 Authentication Blueprint for Cloud Network Anomaly Detection.
 Provides user registration, login, logout, and current user retrieval APIs.
+Includes admin authorization decorator for protected routes.
 """
 
 import re
 import logging
+from functools import wraps
 from flask import Blueprint, request, jsonify, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from backend.db import db, User
@@ -15,6 +17,40 @@ logger = logging.getLogger(__name__)
 
 # Regular expression for email validation
 EMAIL_REGEX = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+
+
+def require_auth(f):
+    """Decorator to require authentication for a route."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Unauthorized. Please log in.'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def require_admin(f):
+    """Decorator to require admin role for a route."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        user_id = session.get('user_id')
+        user_role = session.get('role')
+        
+        # Diagnostic logging (safe - no sensitive data)
+        logger.info(f"Admin access check - Endpoint: {request.endpoint}, Has user_id: {bool(user_id)}, Role: {user_role}")
+        
+        if not user_id:
+            logger.warning(f"Admin access denied - No user_id in session. Session keys: {list(session.keys())}")
+            return jsonify({'error': 'Unauthorized. Please log in.'}), 401
+        
+        if user_role != 'admin':
+            logger.warning(f"Admin access denied - User {user_id} has role '{user_role}', not 'admin'")
+            return jsonify({'error': 'Forbidden. Admin access required.'}), 403
+        
+        logger.info(f"Admin access granted - User {user_id} with role '{user_role}'")
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def validate_registration_input(data):
@@ -63,12 +99,6 @@ def register():
 
         if not password or len(password) < 6:
             return jsonify({'error': 'Password must be at least 6 characters long.'}), 400
-
-        # Ensure database tables exist before querying
-        try:
-            db.create_all()
-        except Exception as table_err:
-            logger.warning(f"Table verification in register: {table_err}")
 
         # Check for duplicate username / email
         try:
@@ -134,12 +164,6 @@ def login():
 
         login_identifier = login_identifier.strip()
 
-        # Ensure database tables exist before querying
-        try:
-            db.create_all()
-        except Exception as table_err:
-            logger.warning(f"Table verification in login: {table_err}")
-
         # Find user by username or email
         try:
             user = User.query.filter(
@@ -194,6 +218,66 @@ def get_current_user():
         }), 200
     except Exception as e:
         return jsonify({'error': f'Database Error: {str(e)}'}), 500
+
+
+@auth_bp.route('/admin-login', methods=['POST'])
+def admin_login():
+    """
+    POST /api/auth/admin-login
+    Authenticate admin user and initiate session.
+    Requires admin role to succeed.
+    """
+    try:
+        data = request.get_json(silent=True)
+        if not data or not isinstance(data, dict):
+            return jsonify({'error': 'Request body must be a valid JSON object.'}), 400
+
+        username = data.get('username', '').strip()
+        password = data.get('password')
+
+        if not username or not password:
+            return jsonify({'error': 'Username and Password are required fields.'}), 400
+
+        # Find user by username (admin login uses username only, not email)
+        try:
+            user = User.query.filter_by(username=username).first()
+        except Exception as query_err:
+            logger.error(f"Database query error during admin login check: {query_err}")
+            return jsonify({
+                'error': f'Database Connection Error: {str(query_err)}'
+            }), 500
+
+        # Verify user exists, password matches, and role is admin
+        if not user:
+            logger.warning(f"Failed admin login attempt: Username '{username}' not found from IP: {request.remote_addr}")
+            return jsonify({'error': 'Invalid admin credentials.'}), 401
+        
+        if not check_password_hash(user.password_hash, password):
+            logger.warning(f"Failed admin login attempt: Invalid password for '{username}' from IP: {request.remote_addr}")
+            return jsonify({'error': 'Invalid admin credentials.'}), 401
+        
+        if user.role != 'admin':
+            logger.warning(f"Unauthorized admin access attempt: User '{username}' (role: {user.role}) from IP: {request.remote_addr}")
+            return jsonify({'error': 'Access denied. Admin privileges required.'}), 403
+
+        # Successful admin login -> Set session data
+        session['user_id'] = user.id
+        session['username'] = user.username
+        session['role'] = user.role
+
+        # Diagnostic logging
+        logger.info(f"Successful ADMIN login: User ID={user.id}, Username='{user.username}', Role='{user.role}' from IP={request.remote_addr}")
+        logger.info(f"Session after login - Keys: {list(session.keys())}, user_id: {session.get('user_id')}, role: {session.get('role')}")
+
+        return jsonify({
+            'message': 'Admin login successful.',
+            'user': user.to_dict(),
+            'session_id': session.sid if hasattr(session, 'sid') else 'active_admin_session'
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Internal error during admin login: {e}", exc_info=True)
+        return jsonify({'error': f'Admin Login Error: {str(e)}'}), 500
 
 
 @auth_bp.route('/logout', methods=['POST'])

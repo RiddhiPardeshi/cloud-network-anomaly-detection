@@ -112,8 +112,8 @@ def get_dashboard_charts():
         }
 
         # 3. Timeline Series (Bucketed by Hour or recent samples)
-        # Fetch last 24 hours of predictions or recent 100 entries
-        timeline_records = PredictionLog.query.order_by(PredictionLog.timestamp.desc()).limit(200).all()
+        # Fetch recent predictions and group by time - limit to last 50 for performance
+        timeline_records = PredictionLog.query.order_by(PredictionLog.timestamp.desc()).limit(50).all()
         timeline_records.reverse()  # Chronological order
 
         time_buckets = {}
@@ -125,9 +125,16 @@ def get_dashboard_charts():
             if rec.is_attack:
                 time_buckets[hour_str]['attacks'] += 1
 
-        timeline_labels = list(time_buckets.keys())[-15:] if time_buckets else ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00']
-        total_requests_series = [time_buckets[k]['total'] for k in timeline_labels] if time_buckets else [10, 25, 18, 30, 45, 20]
-        attack_requests_series = [time_buckets[k]['attacks'] for k in timeline_labels] if time_buckets else [1, 5, 2, 8, 12, 3]
+        # Use actual data only, return empty if no data
+        if time_buckets:
+            timeline_labels = list(time_buckets.keys())[-15:]  # Last 15 time points
+            total_requests_series = [time_buckets[k]['total'] for k in timeline_labels]
+            attack_requests_series = [time_buckets[k]['attacks'] for k in timeline_labels]
+        else:
+            # Return empty arrays if no data
+            timeline_labels = []
+            total_requests_series = []
+            attack_requests_series = []
 
         request_timeline = {
             'labels': timeline_labels,

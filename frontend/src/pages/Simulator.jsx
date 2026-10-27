@@ -135,6 +135,66 @@ const Simulator = () => {
         />
       </div>
 
+      {/* Performance Metrics (Enhanced Reporting) */}
+      {status?.performance && (
+        <div className="kpi-grid" style={{ marginTop: '1.5rem' }}>
+          <KPICard
+            title="Attempted Requests"
+            value={status.performance.attempted_requests ?? 0}
+            subtext="Total Attempted Generations"
+            icon="🎯"
+            accentColor="var(--accent-blue)"
+          />
+          <KPICard
+            title="Successful Requests"
+            value={status.performance.successful_requests ?? 0}
+            subtext="Successfully Processed"
+            icon="✅"
+            accentColor="var(--accent-green)"
+          />
+          <KPICard
+            title="Failed Requests"
+            value={status.performance.failed_requests ?? 0}
+            subtext="Processing Errors"
+            icon="❌"
+            accentColor="var(--accent-red)"
+          />
+          <KPICard
+            title="Configured Rate"
+            value={status.performance.configured_rate !== undefined 
+              ? `${status.performance.configured_rate.toFixed(2)} req/s`
+              : '—'}
+            subtext="Target Request Rate"
+            icon="🎚️"
+            accentColor="var(--accent-purple)"
+          />
+          <KPICard
+            title="Achieved Rate"
+            value={status.performance.achieved_rate !== undefined 
+              ? `${status.performance.achieved_rate.toFixed(3)} req/s`
+              : '—'}
+            subtext="Actual Throughput"
+            icon="📊"
+            accentColor={
+              status.performance.achieved_rate && status.performance.configured_rate 
+                ? (status.performance.achieved_rate >= status.performance.configured_rate * 0.8 
+                  ? 'var(--accent-green)' 
+                  : 'var(--accent-amber)')
+                : 'var(--accent-cyan)'
+            }
+          />
+          <KPICard
+            title="Actual Duration"
+            value={status.performance.actual_duration !== undefined 
+              ? `${status.performance.actual_duration.toFixed(1)}s`
+              : '—'}
+            subtext="Measured Runtime"
+            icon="⏱️"
+            accentColor="var(--accent-cyan)"
+          />
+        </div>
+      )}
+
       {/* Simulator Controls & Trigger Section */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
         {/* Continuous Simulator Panel */}

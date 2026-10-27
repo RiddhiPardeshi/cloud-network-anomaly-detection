@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Login from './pages/Login';
+import AdminLogin from './pages/AdminLogin';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Simulator from './pages/Simulator';
 import ModelMetrics from './pages/ModelMetrics';
 import SystemHealth from './pages/SystemHealth';
+import AdminPanel from './pages/AdminPanel';
 import './styles/main.css';
 
 function App() {
@@ -28,6 +30,10 @@ function App() {
           element={user ? <Navigate to="/dashboard" replace /> : <Login onLoginSuccess={(u) => setUser(u)} />}
         />
         <Route
+          path="/admin-login"
+          element={user ? <Navigate to="/dashboard" replace /> : <AdminLogin onLoginSuccess={(u) => setUser(u)} />}
+        />
+        <Route
           path="/register"
           element={user ? <Navigate to="/dashboard" replace /> : <Register />}
         />
@@ -45,6 +51,16 @@ function App() {
                     <Route path="/simulator" element={<Simulator />} />
                     <Route path="/model-metrics" element={<ModelMetrics />} />
                     <Route path="/system-health" element={<SystemHealth />} />
+                    <Route
+                      path="/admin"
+                      element={
+                        user?.role === 'admin' ? (
+                          <AdminPanel />
+                        ) : (
+                          <Navigate to="/dashboard" replace />
+                        )
+                      }
+                    />
                     <Route path="*" element={<Navigate to="/dashboard" replace />} />
                   </Routes>
                 </main>
